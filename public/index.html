@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RDW Vehicle Datasheet</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
+    .container { display: flex; gap: 40px; }
+    .search-panel { flex: 1; max-width: 400px; }
+    .datasheet-panel { flex: 2; }
+    
+    input { padding: 8px; width: 70%; margin-bottom: 10px; }
+    button { padding: 8px 16px; cursor: pointer; background: #0056b3; color: white; border: none; border-radius: 4px; }
+    button:hover { background: #004494; }
+    
+    .result-item { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 4px; background: #f9f9f9; }
+    
+    /* Section and Table Styling */
+    .section-title { margin-top: 30px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 2px solid #0056b3; color: #0056b3; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; width: 40%; font-weight: bold; }
+    
+    .header-controls { display: flex; justify-content: space-between; align-items: center; }
+
+    /* Printer-friendly styling */
+    @media print {
+      body { margin: 0; }
+      .no-print { display: none !important; }
+      .datasheet-panel { width: 100%; }
+      .section-title { color: #000; border-bottom: 2px solid #000; page-break-after: avoid; }
+      table { font-size: 12px; page-break-inside: avoid; }
+      th, td { padding: 4px; border: 1px solid #000; }
+      th { background-color: #e5e5e5 !important; -webkit-print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+
+  <h1 class="no-print">Type Approval Search</h1>
+  
+  <div class="container">
+    <div class="search-panel no-print">
+      <input type="text" id="approval" placeholder="e.g., e4*2007/46*1259*02">
+      <button onclick="searchApprovals()">Search</button>
+      
+      <div id="results" style="margin-top: 20px;"></div>
+    </div>
+
+    <div class="datasheet-panel" id="datasheet-container" style="display: none;">
+      <div class="header-controls">
+        <h2>Vehicle Datasheet</h2>
+        <button onclick="window.print()" class="no-print">Print Datasheet</button>
+      </div>
+      <div id="datasheet"></div>
+    </div>
+  </div>
+
+<script>
+    // Global variable to store the official RDW definitions
+    let rdwGlossary = {};
+
+    // Fetch the official dictionary from our backend when the page loads
+    window.onload = async () => {
+      try {
+        const res = await fetch('/api/glossary');
+        rdwGlossary = await res.json();
+      } catch (err) {
+        console.warn("Could not load RDW glossary. Falling back to default keys.");
+      }
+    };
+
+    // Dictionary to assign keys to logical SECTIONS (Labels will come from RDW glossary)
+    const sectionMapping = {
+      // General Information & Series
+      "merk_naam": "General Information",
+      "handelsbenamingfabrikant": "General Information",
+      "typegoedkeuringsnummer": "General Information",
+      "codevarianttgk": "General Information",
+      "codeuitvoeringtgk": "General Information",
+      "voertuigcategorie": "General Information",
+
+      // Engine Specifications & Drive Type
+      "motorcode": "Engine & Drive",
+      "aantal_cilinders": "Engine & Drive",
+      "cilinderinhoud": "Engine & Drive",
+      "maximum_netto_vermogen_bgr": "Engine & Drive",
+      "maximum_netto_vermogen_ogr": "Engine & Drive",
+      "nominaal_continu_maximum_vermogen": "Engine & Drive",
+      "netto_max_vermogen_elektrisch": "Engine & Drive",
+      "netto_maximum_vermogen": "Engine & Drive",
+      "aandrijving": "Engine & Drive",
+      "code_werking_motor": "Engine & Drive",
+
+      // Fuel Consumption, Range & Average CO2
+      "brandstof_omschrijving": "Fuel & Emissions",
+      "brandstofverbruik_gecomb_wltp_bgr": "Fuel & Emissions",
+      "brandstofverbruik_gecomb_wltp_ogr": "Fuel & Emissions",
+      "brandstofverbruik_gecombineerd": "Fuel & Emissions",
+      "co2_emis_gecombineerd_wltp_bgr": "Fuel & Emissions",
+      "co2_emis_gecombineerd_wltp_ogr": "Fuel & Emissions",
+      "co2_uitstoot_gecombineerd": "Fuel & Emissions",
+      "actieradius_volledig_elek_wltp_bgr": "Fuel & Emissions",
+      "actieradius_volledig_elek_wltp_ogr": "Fuel & Emissions",
+      "elektrische_actieradius_nedc": "Fuel & Emissions",
+      "milieuklasse_eg_goedkeuring_licht": "Fuel & Emissions",
+      "geluidsniveau_stationair": "Fuel & Emissions",
+
+      // Body Type & Dimensions
+      "carrosserie_naam": "Body & Dimensions",
+      "codecarrosseriecode": "Body & Dimensions",
+      "codecarrosserietype": "Body & Dimensions",
+      "aantal_zitplaatsen_bovengrens": "Body & Dimensions",
+      "aantal_zitplaatsen_ondergrens": "Body & Dimensions",
+      "massa_ledig_bovengrens": "Body & Dimensions",
+      "massa_ledig_ondergrens": "Body & Dimensions",
+      "wielbasis_bovengrens": "Body & Dimensions",
+      "wielbasis_ondergrens": "Body & Dimensions"
+    };
+
+    async function searchApprovals() {
+      const number = document.getElementById("approval").value;
+      if (!number) return alert("Please enter an approval number.");
+
+      const container = document.getElementById("results");
+      container.innerHTML = "<em>Searching...</em>";
+
+      try {
+        const res = await fetch(`/api/search?number=${encodeURIComponent(number)}`);
+        const data = await res.json();
+
+        container.innerHTML = `<h3>Found ${data.length} Results:</h3>`;
+
+        data.forEach(item => {
+          const div = document.createElement("div");
+          div.className = "result-item";
+          div.innerHTML = `
+            <p>Variant: <b>${item.codevarianttgk}</b></p>
+            <p>Uitvoering: <b>${item.codeuitvoeringtgk}</b></p>
+            <button onclick="fetchDetails('${number}', '${item.codevarianttgk}', '${item.codeuitvoeringtgk}')">View Details</button>
+          `;
+          container.appendChild(div);
+        });
+      } catch (err) {
+        container.innerHTML = "<p style='color:red;'>Failed to fetch search results.</p>";
+      }
+    }
+
+    async function fetchDetails(number, variant, uitvoering) {
+      const sheet = document.getElementById("datasheet");
+      const sheetContainer = document.getElementById("datasheet-container");
+      
+      sheetContainer.style.display = "block";
+      sheet.innerHTML = "<em>Loading comprehensive data...</em>";
+
+      try {
+        const url = `/api/details?number=${encodeURIComponent(number)}&variant=${encodeURIComponent(variant)}&uitvoering=${encodeURIComponent(uitvoering)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        // Object to hold our categorized data
+        const sections = {
+          "General Information": {},
+          "Engine & Drive": {},
+          "Fuel & Emissions": {},
+          "Body & Dimensions": {},
+          "Technical Data": {} // Catch-all
+        };
+
+        // Sort data into sections and apply official RDW labels!
+        Object.entries(data).forEach(([key, value]) => {
+          const sectionName = sectionMapping[key] || "Technical Data";
+          
+          // Use the official RDW glossary description! 
+          // If it isn't in the glossary, fall back to making the key look nice.
+          let displayLabel = rdwGlossary[key];
+          if (!displayLabel) {
+             displayLabel = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+          }
+
+          sections[sectionName][displayLabel] = value;
+        });
+
+        // Generate the HTML
+        let html = "";
+        for (const [sectionName, sectionData] of Object.entries(sections)) {
+          if (Object.keys(sectionData).length === 0) continue;
+
+          html += `
+            <h3 class="section-title">${sectionName}</h3>
+            <table>
+              <tbody>
+          `;
+          
+          for (const [label, val] of Object.entries(sectionData)) {
+            html += `<tr><th>${label}</th><td>${val}</td></tr>`;
+          }
+          
+          html += `
+              </tbody>
+            </table>
+          `;
+        }
+
+        sheet.innerHTML = html;
+      } catch (err) {
+        sheet.innerHTML = "<p style='color:red;'>Failed to load vehicle details.</p>";
+      }
+    }
+  </script>
+</body>
+</html>
